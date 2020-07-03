@@ -1,14 +1,19 @@
-// Copyright 2018-2020 the Deno authors. All rights reserved. MIT license.
+// Copyright 2020 the Tumu authors. All rights reserved. MIT license.
 // #![deny(warnings)]
 
 use deno::colors;
 use deno::tokio_util;
 use deno::GlobalState;
-use deno::MainWorker;
+use deno::Worker;
 use deno::DenoSubcommand;
 use deno::Flags;
+use deno::ops;
+use deno::ops::io::get_stdio;
+use deno::state::State;
+use deno::startup_data;
 use deno_core::ErrBox;
 use deno_core::ModuleSpecifier;
+use deno_core::CoreIsolate;
 use futures::future::FutureExt;
 use log::Level;
 use log::Metadata;
@@ -17,7 +22,6 @@ use std::env;
 
 static LOGGER: Logger = Logger;
 
-// TODO(ry) Switch to env_logger or other standard crate.
 struct Logger;
 
 impl log::Log for Logger {
@@ -47,9 +51,52 @@ impl log::Log for Logger {
 async fn exec(flags: Flags, script: String) -> Result<(), ErrBox> {
   let global_state = GlobalState::new(flags.clone())?;
   let main_module = ModuleSpecifier::resolve_url_or_path(&script).unwrap();
-  let mut worker =
-    MainWorker::create(global_state.clone(), main_module.clone())?;
-
+  let state = State::new(
+    global_state.clone(),
+    None,
+    main_module.clone(),
+    global_state.maybe_import_map.clone(),
+    false,
+  )?;
+  let state_ = state.clone();
+  let mut worker = Worker::new(
+    "main".to_string(),
+    startup_data::deno_isolate_init(),
+    state_
+  );
+  {
+    let isolate = &mut worker.isolate;
+    ops::runtime::init(isolate, &state);
+    ops::runtime_compiler::init(isolate, &state);
+    ops::errors::init(isolate, &state);
+    ops::fetch::init(isolate, &state);
+    ops::fs::init(isolate, &state);
+    ops::fs_events::init(isolate, &state);
+    ops::io::init(isolate, &state);
+    ops::plugin::init(isolate, &state);
+    ops::net::init(isolate, &state);
+    ops::tls::init(isolate, &state);
+    ops::os::init(isolate, &state);
+    ops::permissions::init(isolate, &state);
+    ops::process::init(isolate, &state);
+    ops::random::init(isolate, &state);
+    ops::repl::init(isolate, &state);
+    ops::resources::init(isolate, &state);
+    ops::signal::init(isolate, &state);
+    ops::timers::init(isolate, &state);
+    ops::tty::init(isolate, &state);
+    ops::worker_host::init(isolate, &state);
+  }
+  {
+    let (stdin, stdout, stderr) = get_stdio();
+    let state_rc = CoreIsolate::state(&worker.isolate);
+    let state = state_rc.borrow();
+    let mut t = state.resource_table.borrow_mut();
+    t.add("stdin", Box::new(stdin));
+    t.add("stdout", Box::new(stdout));
+    t.add("stderr", Box::new(stderr));
+  }
+  worker.execute("bootstrap.mainRuntime()")?;
   worker.execute_module(&main_module).await?;
   worker.execute("window.dispatchEvent(new Event('load'))")?;
   (&mut *worker).await?;

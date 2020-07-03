@@ -79,6 +79,7 @@ pub use crate::msg::MediaType;
 pub use crate::op_error::OpError;
 pub use crate::permissions::Permissions;
 pub use crate::tsc::TargetLib;
+pub use crate::worker::Worker;
 pub use crate::worker::MainWorker;
 use deno_core::ErrBox;
 pub use flags::DenoSubcommand;
