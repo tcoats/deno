@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "cli",
+  "tumu",
   "core",
   "tools/hyper_hello",
   "deno_typescript",
